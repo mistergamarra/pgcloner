@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 
 	"github.com/urfave/cli/v3"
@@ -33,13 +34,42 @@ const (
 )
 
 // version, commit, and date are set via -ldflags at build time (see
-// .goreleaser.yaml); they stay "dev"/"none"/"unknown" for `go build`/`go
-// run` without those flags.
+// .goreleaser.yaml) for GoReleaser-built binaries. `go install
+// .../pgcloner@vX.Y.Z` never runs GoReleaser, so these stay at their
+// zero values there — buildVersion() falls back to the module/VCS info
+// the Go toolchain stamps into every binary automatically in that case.
 var (
 	version = "dev"
 	commit  = "none"
 	date    = "unknown"
 )
+
+// buildVersion resolves version/commit/date, preferring the ldflags-injected
+// values (GoReleaser builds) and falling back to runtime/debug.BuildInfo
+// (go install builds, where Go stamps the module version and VCS revision
+// automatically).
+func buildVersion() (v, c, d string) {
+	v, c, d = version, commit, date
+	if v != "dev" {
+		return v, c, d
+	}
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return v, c, d
+	}
+	if info.Main.Version != "" && info.Main.Version != "(devel)" {
+		v = info.Main.Version
+	}
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			c = s.Value
+		case "vcs.time":
+			d = s.Value
+		}
+	}
+	return v, c, d
+}
 
 func main() {
 	cfg, err := config.Load()
@@ -48,10 +78,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	v, c, d := buildVersion()
 	cmd := &cli.Command{
 		Name:    "pgcloner",
 		Usage:   "dump PostgreSQL databases via Teleport and restore them into local Docker containers",
-		Version: fmt.Sprintf("%s (commit %s, built %s)", version, commit, date),
+		Version: fmt.Sprintf("%s (commit %s, built %s)", v, c, d),
 		Description: "Every flag below can also be set via a PGCLONER_* environment variable\n" +
 			"(see README.md) or a .env file next to the binary. Flags take precedence.",
 		Suggest: true,
