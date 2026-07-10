@@ -14,11 +14,14 @@ import (
 	"strings"
 )
 
+// readmePointer is where every missing-tool message sends the user —
+// install commands live in exactly one place (the README) so they don't
+// go stale in two places at once.
+const readmePointer = "see the Prerequisites section in README.md and make sure it's installed"
+
 // Binary describes one external dependency.
 type Binary struct {
 	Name string
-	// Hint is shown when the binary is missing.
-	Hint string
 	// VersionArgs, if set, is run to print a one-line version string in
 	// the doctor report (e.g. []string{"--version"}).
 	VersionArgs []string
@@ -30,25 +33,21 @@ type Binary struct {
 var Binaries = []Binary{
 	{
 		Name:        "tsh",
-		Hint:        "install the Teleport client: https://goteleport.com/docs/installation/",
 		VersionArgs: []string{"version"},
 		UsedBy:      []string{"login", "db-list", "dump"},
 	},
 	{
 		Name:        "pg_dump",
-		Hint:        "install PostgreSQL client tools (part of libpq), e.g. `brew install libpq` or `apt install postgresql-client`",
 		VersionArgs: []string{"--version"},
 		UsedBy:      []string{"dump"},
 	},
 	{
 		Name:        "psql",
-		Hint:        "install PostgreSQL client tools (part of libpq), e.g. `brew install libpq` or `apt install postgresql-client`",
 		VersionArgs: []string{"--version"},
 		UsedBy:      []string{"dump", "restore"},
 	},
 	{
 		Name:        "docker",
-		Hint:        "install Docker: https://docs.docker.com/get-docker/",
 		VersionArgs: []string{"--version"},
 		UsedBy:      []string{"restore"},
 	},
@@ -116,7 +115,7 @@ func Require(ctx context.Context, forCommand ...string) error {
 	var missing []string
 	for _, r := range Check(ctx, forCommand...) {
 		if !r.OK() {
-			missing = append(missing, fmt.Sprintf("  - %s: %s", r.Binary.Name, r.Binary.Hint))
+			missing = append(missing, fmt.Sprintf("  - %s: %s", r.Binary.Name, readmePointer))
 		}
 	}
 	if len(missing) == 0 {
@@ -135,7 +134,7 @@ func Report(ctx context.Context, w io.Writer) (allOK bool) {
 	for _, r := range Check(ctx) {
 		if !r.OK() {
 			allOK = false
-			fmt.Fprintf(w, "✗ %-8s not found — %s\n", r.Binary.Name, r.Binary.Hint)
+			fmt.Fprintf(w, "✗ %-8s not found — %s\n", r.Binary.Name, readmePointer)
 			continue
 		}
 		version := r.Version
