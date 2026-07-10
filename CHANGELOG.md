@@ -3,6 +3,19 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.0.2] - 2026-07-09
+
+### Fixed
+
+- `--version`/`-v` printed `dev (commit none, built unknown)` when
+  installed via `go install github.com/mistergamarra/pgcloner/cmd/pgcloner@version`,
+  because `-ldflags` (how `.goreleaser.yaml` injects the real version) are
+  only applied by GoReleaser's own build step, never by `go install`.
+  `main.buildVersion()` now falls back to `runtime/debug.ReadBuildInfo()`
+  in that case, which Go stamps automatically with the module version and
+  VCS commit/time — so `go install`-built binaries now report the correct
+  version too, not just GoReleaser-built release archives.
+
 ## [0.0.1] - 2026-07-09
 
 Initial release. A Go CLI for pulling PostgreSQL dumps from Teleport-protected
