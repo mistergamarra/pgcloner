@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"time"
 )
 
 // Container describes one existing "pgcloner-*" container.
@@ -100,19 +99,4 @@ func RunPostgres(ctx context.Context, name, image, password string, hostPort int
 	)
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
-}
-
-// WaitReady polls the given TCP address until it accepts connections or
-// timeout elapses.
-func WaitReady(addr string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
-		if err == nil {
-			_ = conn.Close()
-			return nil
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	return fmt.Errorf("postgres in container did not become ready within %s", timeout)
 }

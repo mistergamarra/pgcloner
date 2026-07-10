@@ -76,6 +76,16 @@ otherwise.
   Postgres ping — Teleport's tunnel needs a username+DB before it speaks
   the PG protocol, so a `pg_isready`/pgx ping fails against the bare tunnel
   before `db login` completes.
+- **Container readiness is the opposite case**: `pgutil.WaitReady`
+  (used by `restorecmd` after starting a fresh container) retries a real
+  Postgres ping, not a raw TCP dial — here the container's own port *is*
+  reachable early, since the official `postgres` image briefly runs a
+  temporary internal server (bound to the same port) to execute init
+  scripts on first run, then restarts into its real listening process. A
+  bare TCP check can succeed against that temporary server and then get
+  "connection reset by peer" on the actual protocol handshake moments
+  later; retrying the real ping rides out the restart instead of racing
+  it once. Don't swap this back to a TCP-only check.
 - **Permission-denied retry**: `dumpcmd.runDump` parses `permission denied
   for table <name>` specifically (not `LOCK TABLE`, which lists every
   table being dumped) and retries up to 5 times, excluding one more table

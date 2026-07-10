@@ -7,6 +7,7 @@ package pgutil
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -120,4 +121,30 @@ func Ping(ctx context.Context, connString string) error {
 	}
 	defer conn.Close(ctx)
 	return conn.Ping(ctx)
+}
+
+// WaitReady retries Ping until it succeeds or timeout elapses. A bare TCP
+// check isn't enough here: the official postgres Docker image's
+// entrypoint briefly starts a temporary internal server to run init
+// scripts, then restarts into its final listening process — a raw TCP
+// dial can succeed against that temporary server (or catch the restart
+// mid-flight) and then get "connection reset by peer" on the real
+// protocol handshake moments later. Retrying the actual Postgres ping
+// rides out that restart instead of racing it once.
+func WaitReady(ctx context.Context, connString string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		if err := Ping(ctx, connString); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	return fmt.Errorf("postgres did not become ready within %s: %w", timeout, lastErr)
 }

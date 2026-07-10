@@ -54,10 +54,8 @@ func Run(ctx context.Context, cfg *config.AppConf) error {
 	}
 
 	maintConn := fmt.Sprintf("postgres://postgres:%s@127.0.0.1:%d/postgres?sslmode=disable", cfg.Restore.PGPassword, hostPort)
-	if err := dockerutil.WaitReady(fmt.Sprintf("127.0.0.1:%d", hostPort), 30*time.Second); err != nil {
-		return err
-	}
-	if err := pgutil.Ping(ctx, maintConn); err != nil {
+	fmt.Fprintln(os.Stderr, "Waiting for Postgres to be ready...")
+	if err := pgutil.WaitReady(ctx, maintConn, 30*time.Second); err != nil {
 		return fmt.Errorf("postgres not reachable: %w", err)
 	}
 

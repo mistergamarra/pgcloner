@@ -21,6 +21,13 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `--version` now omits `commit`/`built` entirely when they're unknown
   (e.g. `go install`-built binaries, which have no local VCS checkout to
   read from) instead of printing `commit none, built unknown`.
+- `restore` could fail with `connection reset by peer` right after
+  "Starting container ..." on a fresh Postgres container: the readiness
+  check only tested raw TCP reachability, which can succeed against the
+  official `postgres` image's temporary internal server (used to run init
+  scripts on first run) moments before it restarts into its real listening
+  process. `pgutil.WaitReady` now retries an actual Postgres protocol ping
+  instead, riding out that restart instead of racing it once.
 
 ### Changed
 
