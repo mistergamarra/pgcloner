@@ -3,6 +3,33 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.0.3] - 2026-07-09
+
+### Fixed
+
+- `dump` could get permanently stuck when Teleport's suggested bootstrap
+  database, or the database the user picked, turned out to be one the
+  connecting DB user has no actual grants on (`pg_database` lists every
+  database regardless of per-database permissions, so this is expected,
+  not a fluke). Both cases now retry instead of aborting the whole
+  command:
+  - The bootstrap-database heuristic now prompts for an alternate
+    bootstrap database name on connect failure and retries.
+  - Failing to connect to the database the user picked now returns to
+    the database picker (with the same candidate list) instead of
+    hard-failing — Esc still cancels the command as before.
+- `--version` now omits `commit`/`built` entirely when they're unknown
+  (e.g. `go install`-built binaries, which have no local VCS checkout to
+  read from) instead of printing `commit none, built unknown`.
+
+### Changed
+
+- `doctor` and every command's preflight check now point missing-tool
+  errors at the README's Prerequisites section instead of printing a
+  hardcoded install command (`brew install ...`) per tool — install
+  instructions now live in exactly one place instead of two that can
+  drift out of sync.
+
 ## [0.0.2] - 2026-07-09
 
 ### Fixed

@@ -40,10 +40,18 @@ otherwise.
 - **Preflight checks**: `internal/doctor` knows which external binary each
   command needs (`doctor.Binaries[].UsedBy`). Every command that shells
   out gets a `Before: requireTools("<name>")` hook in `main.go`, so a
-  missing `tsh`/`pg_dump`/`psql`/`docker` fails immediately with an
-  actionable hint instead of an `exec: not found` mid-wizard. `doctor`
-  itself has no such hook — it's the one command allowed to report
-  missing tools rather than fail on them.
+  missing `tsh`/`pg_dump`/`psql`/`docker` fails immediately instead of an
+  `exec: not found` mid-wizard. `doctor` itself has no such hook — it's
+  the one command allowed to report missing tools rather than fail on
+  them.
+- **Install instructions live in exactly one place**: the README's
+  Prerequisites table. `doctor.go` deliberately has no per-tool install
+  command (no `brew install ...`, no OS detection) — every missing-tool
+  message (`doctor.readmePointer`) just says "see the Prerequisites
+  section in README.md." Keeping install commands in code risks two
+  copies drifting out of sync (wrong Homebrew formula name, missing an
+  OS, etc.); if the required tools or how to install them change, update
+  the README table — `doctor.go` doesn't need touching.
 
 ## Deviations from the bash scripts (and why)
 
@@ -97,6 +105,25 @@ otherwise.
   `Error: <err>` path. Interactive `huh` prompts are unaffected by this — huh
   puts the terminal in raw mode and intercepts Ctrl-C itself
   (`uiselect.ErrBack`), it never reaches the OS as SIGINT.
+- **Database listing vs. connectability**: `dumpcmd.listCandidateDatabases`
+  lists databases via `pg_database`, which is visible to any authenticated
+  user regardless of that user's actual grants on each individual
+  database — so a name showing up in the picker is not a guarantee the
+  connecting `dbUser` can actually connect to it. Two places in
+  `dumpcmd.Run` handle this rather than hard-failing:
+  1. `listDatabasesRetryingBootstrap` — `teleport.Proxy.BootstrapDB()`'s
+     suggested bootstrap database is a heuristic (parsed from tsh's
+     startup log) and can itself be one the user can't connect to; on
+     failure it prompts for a different bootstrap database name and
+     retries, rather than aborting `dump` outright.
+  2. `Run`'s database-selection loop — if re-auth/connect for the
+     *chosen* database fails (Postgres returns "access to db denied" —
+     not a Go-distinguishable error, just the connect failing), it loops
+     back to the database picker instead of aborting, since the failure
+     only means "this particular database," not "this DB user is
+     unusable." A cancellation (`uiselect.ErrBack`, e.g. Esc during
+     schema selection) is checked for explicitly and still exits
+     immediately — only genuine connect failures trigger the retry.
 - **Table sizes**: `pgutil.ListTables` selects raw
   `pg_total_relation_size` bytes (not `pg_size_pretty`) and formats them
   via `internal/humanize.Bytes`, which biases toward KB/MB (B and GB only

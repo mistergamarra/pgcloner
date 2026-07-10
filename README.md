@@ -14,18 +14,17 @@ configurable via flag, environment variable, or `.env` file.
 
 External binaries on `PATH`:
 
-| Tool | Purpose |
-|------|---------|
-| `tsh` (Teleport) | Authenticate and proxy Teleport DB connections |
-| `pg_dump` / `psql` (libpq) | Run the actual dump and restore |
-| `docker` | Run isolated restore containers |
+| Tool | Purpose | Install |
+|------|---------|---------|
+| `tsh` (Teleport) | Authenticate and proxy Teleport DB connections | `brew install teleport` (macOS) or see [goteleport.com/docs/installation](https://goteleport.com/docs/installation/) |
+| `pg_dump` / `psql` (libpq) | Run the actual dump and restore | `brew install libpq && brew link --force libpq` (macOS) or `apt install postgresql-client` (Debian/Ubuntu) |
+| `docker` | Run isolated restore containers | see [docs.docker.com/get-docker](https://docs.docker.com/get-docker/) |
 
 Go dependencies (`go.mod`) are fetched automatically by `go build`/`go run`.
-Run `pgcloner doctor` after building to check all of the above
-are installed and on `PATH` — every other command also runs this check for
-just what it needs and fails fast with an install hint if something's
-missing, so you don't discover a missing `pg_dump` partway through a
-wizard.
+Run `pgcloner doctor` after building to check all of the above are
+installed and on `PATH` — every other command also runs this check for
+just what it needs and fails fast if something's missing, pointing back
+to this table instead of a bare `exec: not found` mid-wizard.
 
 ## Install
 

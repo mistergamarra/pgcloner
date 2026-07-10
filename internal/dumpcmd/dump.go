@@ -6,6 +6,7 @@ package dumpcmd
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -35,29 +36,49 @@ func Run(ctx context.Context, cfg *config.AppConf) error {
 		return err
 	}
 
-	pgdb, err := pickDatabase(ctx, cfg, dbUser, tunnel)
+	dbs, err := listCandidateDatabases(ctx, cfg, dbUser, tunnel)
 	if err != nil {
 		return err
 	}
 
-	fmt.Fprintf(os.Stderr, "Re-authenticating %s for %s...\n", dbUser, pgdb)
-	if res := teleport.LoginDB(ctx, dbUser, tunnel, pgdb); res.Err != nil {
-		return res.Err
-	}
-	proxy, err := teleport.StartProxy(ctx, dbUser, tunnel, cfg.Teleport.DBPort, pgdb)
-	if err != nil {
-		return err
+	// Listing databases only proves they exist (pg_database is visible to
+	// any authenticated user); it says nothing about whether dbUser can
+	// actually connect to a given one. If re-auth/connect fails for the
+	// chosen database, loop back to the picker instead of aborting the
+	// whole command — the user may need to try a different one.
+	var pgdb, schema, conn string
+	var proxy *teleport.Proxy
+	for {
+		pgdb, err = uiselect.One("Select PostgreSQL database", dbs)
+		if err != nil {
+			return err
+		}
+
+		fmt.Fprintf(os.Stderr, "Re-authenticating %s for %s...\n", dbUser, pgdb)
+		if res := teleport.LoginDB(ctx, dbUser, tunnel, pgdb); res.Err != nil {
+			return res.Err
+		}
+		proxy, err = teleport.StartProxy(ctx, dbUser, tunnel, cfg.Teleport.DBPort, pgdb)
+		if err != nil {
+			return err
+		}
+		if err = proxy.Wait(30 * time.Second); err != nil {
+			proxy.Stop()
+			return err
+		}
+		conn = pgutil.ConnString(dbUser, cfg.Teleport.DBPort, pgdb)
+
+		schema, err = pickSchema(ctx, conn)
+		if err == nil {
+			break
+		}
+		proxy.Stop()
+		if errors.Is(err, uiselect.ErrBack) {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "Could not use database %q: %v\n", pgdb, err)
 	}
 	defer proxy.Stop()
-	if err := proxy.Wait(30 * time.Second); err != nil {
-		return err
-	}
-	conn := pgutil.ConnString(dbUser, cfg.Teleport.DBPort, pgdb)
-
-	schema, err := pickSchema(ctx, conn)
-	if err != nil {
-		return err
-	}
 
 	tables, err := pgutil.ListTables(ctx, conn, schema)
 	if err != nil {
@@ -122,43 +143,70 @@ func pickDBResource(ctx context.Context) (string, error) {
 	return uiselect.One("Select Teleport DB resource", names)
 }
 
-// pickDatabase authenticates against the bootstrap DB (or the policy's
-// allowed-DB list), lists Postgres databases, and lets the user choose one.
-func pickDatabase(ctx context.Context, cfg *config.AppConf, dbUser, tunnel string) (dbName string, err error) {
+// listCandidateDatabases authenticates against the bootstrap DB (or the
+// policy's allowed-DB list) and returns the sorted list of Postgres
+// databases dbUser might be able to use. Note this only proves the
+// databases exist — pg_database is visible regardless of per-database
+// grants — so the caller still needs to handle "picked one we can't
+// actually connect to."
+func listCandidateDatabases(ctx context.Context, cfg *config.AppConf, dbUser, tunnel string) ([]string, error) {
 	fmt.Fprintf(os.Stderr, "Authenticating %s on %s...\n", dbUser, tunnel)
 	res := teleport.LoginDB(ctx, dbUser, tunnel, "")
 
 	var dbs []string
+	var err error
 	switch {
 	case res.Err != nil:
-		return "", res.Err
+		return nil, res.Err
 	case res.OK:
 		proxy, perr := teleport.StartProxy(ctx, dbUser, tunnel, cfg.Teleport.DBPort, "")
 		if perr != nil {
-			return "", perr
+			return nil, perr
 		}
 		defer proxy.Stop()
 		if perr := proxy.Wait(30 * time.Second); perr != nil {
-			return "", perr
+			return nil, perr
 		}
 		bootDB := proxy.BootstrapDB()
 		if bootDB == "" {
 			bootDB = cfg.Teleport.Bootstrap
 		}
-		conn := pgutil.ConnString(dbUser, cfg.Teleport.DBPort, bootDB)
-		dbs, err = pgutil.ListDatabases(ctx, conn)
+		dbs, err = listDatabasesRetryingBootstrap(ctx, cfg, dbUser, bootDB)
 		if err != nil {
-			return "", fmt.Errorf("list databases via bootstrap %s: %w", bootDB, err)
+			return nil, err
 		}
 	default:
 		fmt.Fprintln(os.Stderr, "  Teleport policy lists allowed databases — using that.")
 		dbs = res.AllowedDBNames
 	}
 	if len(dbs) == 0 {
-		return "", fmt.Errorf("could not list any databases")
+		return nil, fmt.Errorf("could not list any databases")
 	}
 	sort.Strings(dbs)
-	return uiselect.One("Select PostgreSQL database", dbs)
+	return dbs, nil
+}
+
+// listDatabasesRetryingBootstrap tries bootDB first (tsh's suggested
+// database, or the configured fallback). tsh's suggestion is only a
+// heuristic — it can name a database the connecting user has no grants
+// on, in which case pgx's connect error surfaces as a Postgres "access to
+// db denied" error, not a Go error we can distinguish further. Rather
+// than hard-failing there with no way forward, prompt for a different
+// bootstrap database name and retry; Esc cancels the whole `dump` command
+// via uiselect.ErrBack.
+func listDatabasesRetryingBootstrap(ctx context.Context, cfg *config.AppConf, dbUser, bootDB string) ([]string, error) {
+	for {
+		conn := pgutil.ConnString(dbUser, cfg.Teleport.DBPort, bootDB)
+		dbs, err := pgutil.ListDatabases(ctx, conn)
+		if err == nil {
+			return dbs, nil
+		}
+		fmt.Fprintf(os.Stderr, "Could not list databases via bootstrap %q: %v\n", bootDB, err)
+		bootDB, err = uiselect.Input("Enter a different bootstrap database to try (Esc to cancel)", cfg.Teleport.Bootstrap)
+		if err != nil {
+			return nil, err
+		}
+	}
 }
 
 func pickSchema(ctx context.Context, conn string) (string, error) {
