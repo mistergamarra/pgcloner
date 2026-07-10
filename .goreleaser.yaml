@@ -1,0 +1,69 @@
+# GoReleaser config — https://goreleaser.com
+# Triggered by .github/workflows/release.yml on every `git tag vX.Y.Z` push.
+version: 2
+
+project_name: pgcloner
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: pgcloner
+    main: ./cmd/pgcloner
+    binary: pgcloner
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .Date }}
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+      - .env.example
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  use: git
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  github:
+    owner: mistergamarra
+    name: pgcloner
+  footer: |
+    ## Installing
+
+    ```sh
+    go install github.com/mistergamarra/pgcloner/cmd/pgcloner@{{ .Tag }}
+    ```
+
+    Or download the archive for your OS/arch below, verify it against `checksums.txt`, extract, and put the `pgcloner` binary on your `PATH`.
