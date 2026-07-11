@@ -113,10 +113,7 @@ func render(spin rune, label string, cur, total int64, elapsed time.Duration, wi
 	// on-disk size exactly (no indexes/TOAST overhead in the dump, but
 	// also no binary packing) — this is an estimate, so cur can overshoot
 	// total; clamp the bar/percentage instead of showing >100%.
-	pct := 100
-	if p := cur * 100 / total; p < 100 {
-		pct = int(p)
-	}
+	pct := min(int(cur*100/total), 100)
 
 	suffix := fmt.Sprintf(" %3d%%  %s / ~%s  %s", pct, humanize.Bytes(cur), humanize.Bytes(total), elapsed)
 	prefix := fmt.Sprintf("%c %s  ", spin, label)
@@ -124,21 +121,14 @@ func render(spin rune, label string, cur, total int64, elapsed time.Duration, wi
 	// shrink, rather than building at maxBarWidth and truncating blindly
 	// — a half-eaten bar reads better than a half-eaten byte count.
 	bw := width - len([]rune(prefix)) - len([]rune(suffix)) - 2 // 2 for "[" "]"
-	if bw > maxBarWidth {
-		bw = maxBarWidth
-	}
-	if bw < minBarWidth {
-		bw = minBarWidth
-	}
+	bw = max(min(bw, maxBarWidth), minBarWidth)
 	return truncate(prefix+bar(cur, total, bw)+suffix, width)
 }
 
 func bar(cur, total int64, width int) string {
 	filled := width
 	if total > 0 {
-		if f := int(int64(width) * cur / total); f < width {
-			filled = f
-		}
+		filled = min(int(int64(width)*cur/total), width)
 	}
 	b := make([]byte, width)
 	for i := range b {
