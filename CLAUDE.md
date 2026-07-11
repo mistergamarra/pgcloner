@@ -92,9 +92,15 @@ otherwise.
   it once. Don't swap this back to a TCP-only check.
 - **Permission-denied retry**: `dumpcmd.runDump` parses `permission denied
   for table <name>` specifically (not `LOCK TABLE`, which lists every
-  table being dumped) and retries up to 5 times, excluding one more table
-  each attempt. This is how dumps succeed even when the connecting DB user
-  only has read access to some tables.
+  table being dumped), excludes that table, and retries — unbounded, not
+  capped at a fixed attempt count — since this is how dumps succeed when
+  the connecting DB user only has read access to some tables. Every
+  `permissionDeniedCheckIn` (3) attempts it stops and asks via
+  `uiselect.Confirm` whether to keep going instead of retrying (or
+  giving up) silently forever; declining returns an error, same as any
+  other cancellation path. Don't reintroduce a hard attempt cap here —
+  the check-in loop replaced it deliberately, for databases with many
+  denied tables where 5 attempts wasn't enough.
 - **`--exclude-table` blacklist, not `--table` whitelist**: a whitelist
   drops shared types, sequences, and extensions from the dump.
 - **COPY format, not `--inserts`**: large JSON columns with embedded
@@ -166,6 +172,33 @@ otherwise.
   showing e.g. 114% when the dump overshoots the estimate. Don't try to
   make this exact; it's meant to give a rough sense of progress on large
   dumps, not a precise byte count.
+- **Progress line must fit the terminal width, or `\r` breaks**:
+  `progress.Watch` detects the terminal width once (via
+  `charmbracelet/x/term.GetSize`, falling back to 80 columns if that
+  fails — redirected output, no TTY, etc.) and `render` shrinks the bar
+  (down to `minBarWidth`) or truncates as a last resort to stay within
+  it. This isn't cosmetic: if a `\r\033[K`-redrawn line is longer than
+  the terminal, it wraps onto a second row, and `\r` only rewinds to the
+  start of that wrapped continuation — not the true start of the line —
+  so every redraw overlaps garbage instead of overwriting cleanly. The
+  visible symptom is the progress line looking completely frozen for the
+  whole dump, then "catching up" all at once when a real `\n` (the next
+  log line) finally resets the terminal's cursor tracking. If you add
+  more to this line, keep it within the shrink/truncate budget rather
+  than assuming an 80+ column terminal.
+- **The dump progress bar can be legitimately stuck at 0 bytes for a
+  long time — that's not a bug**: `pg_dump` builds its full
+  schema/dependency/ACL graph before writing a single byte, and that
+  phase gets slower the more `--exclude-table` flags are passed (each
+  one adds catalog-resolution work) — so with a large schema or many
+  permission-denied exclusions, `outfile` can stay at 0 bytes for most
+  of the wall-clock time, then fill up fast once the actual data-writing
+  phase starts. A byte-size-based bar has nothing to show during that
+  first phase. `progress.Watch` tracks whether `sizeFn` has ever reported
+  `> 0` (the `started` bool) and renders `renderPreparing` (indeterminate:
+  spinner + elapsed only) until it has, switching to the real bar only
+  once bytes actually start flowing — don't "fix" this by making the bar
+  move fictitiously during that phase; there's nothing real to show yet.
 - **Multi-select controls**: `uiselect.Many`'s huh MultiSelect ships with
   `space`/`x` to toggle one row and `ctrl+a` to toggle all — both are huh
   defaults, not something this code implements. The `Description()` set

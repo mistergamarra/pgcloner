@@ -231,9 +231,16 @@ func pickSchema(ctx context.Context, conn string) (string, error) {
 	return picked, nil
 }
 
-// runDump invokes pg_dump, retrying up to 5 times and excluding one more
-// permission-denied table each time — this lets a read-limited DB user
-// dump everything it can access instead of failing outright.
+// permissionDeniedCheckIn is how many consecutive permission-denied
+// retries runDump allows before checking in with the user instead of
+// retrying silently forever.
+const permissionDeniedCheckIn = 3
+
+// runDump invokes pg_dump, excluding one more permission-denied table
+// each time it fails on one — this lets a read-limited DB user dump
+// everything it can access instead of failing outright. Every
+// permissionDeniedCheckIn attempts, it stops and asks whether to keep
+// going rather than retrying (or giving up) silently.
 func runDump(ctx context.Context, conn, schema string, excluded []string, tables []pgutil.Table, outfile string, estimatedTotal int64) error {
 	deniedPattern := regexp.MustCompile(`permission denied for table ([a-z_]+)`)
 	keyBySuffix := make(map[string]string, len(tables))
@@ -241,7 +248,7 @@ func runDump(ctx context.Context, conn, schema string, excluded []string, tables
 		keyBySuffix[t.Name] = t.Key()
 	}
 
-	for attempt := 1; attempt <= 5; attempt++ {
+	for attempt := 1; ; attempt++ {
 		args := []string{conn, "--no-password", "--format=plain", "--no-owner", "--no-acl",
 			"--create", "--clean", "--if-exists"}
 		if schema != "" {
@@ -285,8 +292,19 @@ func runDump(ctx context.Context, conn, schema string, excluded []string, tables
 			}
 		}
 		fmt.Fprintf(os.Stderr, "  Excluding (permission denied): %s\n", strings.Join(newlyDenied, " "))
+
+		if attempt%permissionDeniedCheckIn == 0 {
+			cont, cerr := uiselect.Confirm(fmt.Sprintf(
+				"Still hitting permission-denied errors after %d attempts (%d tables excluded so far) — keep retrying?",
+				attempt, len(excluded)))
+			if cerr != nil {
+				return cerr
+			}
+			if !cont {
+				return fmt.Errorf("dump cancelled after %d permission-denied retries", attempt)
+			}
+		}
 	}
-	return fmt.Errorf("pg_dump still failing with permission errors after 5 attempts")
 }
 
 func validateDump(outfile string) error {

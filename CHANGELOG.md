@@ -13,6 +13,30 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   just a raw byte counter with no sense of how far along it is. It's an
   estimate — pg_dump's COPY-format text output doesn't match on-disk
   table size exactly — so it clamps at 100% instead of overshooting.
+- `dump`'s permission-denied retry no longer gives up after a fixed 5
+  attempts. It now retries indefinitely (excluding one more denied table
+  each time), checking in every 3 attempts to ask whether to keep going —
+  useful against databases with more than 5 tables the connecting user
+  can't access.
+
+### Fixed
+
+- The new dump progress bar could appear completely frozen for the whole
+  dump, then suddenly "catch up" at the very end. Cause: the bar made the
+  progress line longer than before, and once it exceeded the terminal's
+  width it wrapped onto a second row — `\r` only rewinds to the start of
+  that wrapped continuation, not the true start of the line, so every
+  redraw overlapped garbage instead of overwriting cleanly. It now
+  detects terminal width and shrinks/truncates the line to fit instead
+  of assuming a wide terminal.
+- The progress bar could also sit at `0B / 0%` for the entire dump and
+  then fill up in the last second — this one wasn't a display bug:
+  `pg_dump` writes nothing while it resolves the schema/dependency graph
+  first, a phase that gets slower the more tables get excluded for
+  permission-denied errors, so a byte-size-based bar has nothing to show
+  yet. It now shows an indeterminate "preparing (no data written yet)"
+  spinner during that phase and only switches to the real bar once bytes
+  actually start flowing, instead of showing a misleading frozen 0%.
 
 ## [0.0.3] - 2026-07-09
 
