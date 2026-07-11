@@ -102,14 +102,17 @@ func Run(ctx context.Context, cfg *config.AppConf) error {
 		selected[byLabel[l].Key()] = true
 	}
 	var excluded []string
+	var estimatedTotal int64
 	for _, t := range tables {
 		if !selected[t.Key()] {
 			excluded = append(excluded, t.Key())
+			continue
 		}
+		estimatedTotal += t.SizeBytes
 	}
 
 	outfile := fmt.Sprintf("%s-%s.sql", pgdb, time.Now().Format("20060102150405"))
-	if err := runDump(ctx, conn, schema, excluded, tables, outfile); err != nil {
+	if err := runDump(ctx, conn, schema, excluded, tables, outfile, estimatedTotal); err != nil {
 		return err
 	}
 
@@ -231,7 +234,7 @@ func pickSchema(ctx context.Context, conn string) (string, error) {
 // runDump invokes pg_dump, retrying up to 5 times and excluding one more
 // permission-denied table each time — this lets a read-limited DB user
 // dump everything it can access instead of failing outright.
-func runDump(ctx context.Context, conn, schema string, excluded []string, tables []pgutil.Table, outfile string) error {
+func runDump(ctx context.Context, conn, schema string, excluded []string, tables []pgutil.Table, outfile string, estimatedTotal int64) error {
 	deniedPattern := regexp.MustCompile(`permission denied for table ([a-z_]+)`)
 	keyBySuffix := make(map[string]string, len(tables))
 	for _, t := range tables {
@@ -255,7 +258,7 @@ func runDump(ctx context.Context, conn, schema string, excluded []string, tables
 		if err := cmd.Start(); err != nil {
 			return fmt.Errorf("start pg_dump: %w", err)
 		}
-		stop := progress.Watch(fmt.Sprintf("Dumping (attempt %d)", attempt), fileSize(outfile))
+		stop := progress.Watch(fmt.Sprintf("Dumping (attempt %d)", attempt), fileSize(outfile), estimatedTotal)
 		err := cmd.Wait()
 		stop()
 		if err == nil {

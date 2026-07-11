@@ -245,7 +245,7 @@ func restoreDump(ctx context.Context, dumpfile, conn string) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start psql restore: %w", err)
 	}
-	stop := progress.Watch("Restoring", nil)
+	stop := progress.Watch("Restoring", nil, 0)
 	err = cmd.Wait()
 	stop()
 	if err != nil {

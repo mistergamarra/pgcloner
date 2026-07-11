@@ -3,6 +3,17 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- `dump`'s progress indicator now shows a filled bar and percentage
+  estimate (`[####----] 42%  3.1MB / ~7.2MB`) based on the summed
+  on-disk size of the tables you kept selected in the picker, instead of
+  just a raw byte counter with no sense of how far along it is. It's an
+  estimate — pg_dump's COPY-format text output doesn't match on-disk
+  table size exactly — so it clamps at 100% instead of overshooting.
+
 ## [0.0.3] - 2026-07-09
 
 ### Added

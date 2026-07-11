@@ -157,6 +157,15 @@ otherwise.
   show at the extremes) — consistent with the progress indicator's size
   display. Sort order is `pg_total_relation_size(c.oid) DESC NULLS LAST`
   in SQL, so the picker always lists the largest tables first.
+- **Dump progress bar is an estimate, not a real percentage**:
+  `dumpcmd.Run` sums `SizeBytes` of the tables the user kept selected and
+  passes that as `estimatedTotal` into `runDump` → `progress.Watch`. This
+  is `pg_total_relation_size` (on-disk, includes indexes/TOAST) being
+  compared against the pg_dump COPY-format *text* output size — they
+  don't match exactly, so `progress.render` clamps at 100% instead of
+  showing e.g. 114% when the dump overshoots the estimate. Don't try to
+  make this exact; it's meant to give a rough sense of progress on large
+  dumps, not a precise byte count.
 - **Multi-select controls**: `uiselect.Many`'s huh MultiSelect ships with
   `space`/`x` to toggle one row and `ctrl+a` to toggle all — both are huh
   defaults, not something this code implements. The `Description()` set
