@@ -64,9 +64,13 @@ otherwise.
   shelling out to `psql -t -A`. `pg_dump`/`psql` are still invoked via
   `os/exec` for the actual dump and restore — those remain the
   authoritative tools for moving data.
-- **Docker**: `internal/dockerutil` shells out to the `docker` CLI rather
-  than the Docker SDK, matching the original scripts' approach and keeping
-  the dependency surface small.
+- **Container runtime**: `internal/dockerutil.Client` shells out to a
+  configurable container CLI binary (`cfg.Restore.ContainerCmd`, default
+  `"docker"`, `"podman"` also supported) rather than the Docker SDK,
+  keeping the dependency surface small. Podman was added specifically as
+  a Docker-Desktop-licensing escape hatch, not a general "support any
+  runtime" abstraction — see "Container runtime is docker OR podman,
+  nothing lower-level" below for why containerd itself was ruled out.
 
 ## Key behaviors to preserve when touching this code
 
@@ -103,6 +107,19 @@ otherwise.
   buffer) so very long lines (big JSON blobs) don't get truncated.
 - **Container naming**: always `pgcloner-<dbname>`; an existing container
   with that name is removed before a new one is created.
+- **Container runtime is docker OR podman, nothing lower-level**: Docker
+  itself already runs on containerd (since 18.09) — the real choice here
+  was "shell out to the `docker` CLI vs. containerd's own tooling," not
+  "swap runtimes." That was ruled out: containerd's native `ctr` CLI is
+  explicitly documented upstream as a debugging tool, not meant for
+  scripting, and has no built-in port-publishing (`-p host:5432`) the way
+  `docker run`/`podman run` do — supporting it directly would mean
+  reimplementing networking ourselves. Podman was added instead because
+  it's a verified drop-in for every command this tool issues (`run`,
+  `ps --filter --format`, `inspect --format` with the exact same Go
+  template, `rm -f`) — see `dockerutil.Client`, which just takes a binary
+  name. Don't add a `containerd`/`ctr` code path without first solving
+  port publishing for it.
 - **Ctrl-C cancellation**: `main` wraps the root context in
   `signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)`, so every
   `exec.CommandContext`-based call (`pg_dump`, `psql`, `tsh`) is killed the

@@ -26,12 +26,14 @@ var dbNameFromFile = regexp.MustCompile(`-\d{14}$`)
 
 // Run drives the restore wizard.
 func Run(ctx context.Context, cfg *config.AppConf) error {
+	docker := dockerutil.New(cfg.Restore.ContainerCmd)
+
 	dumpfile, err := pickDumpFile()
 	if err != nil {
 		return err
 	}
 
-	containerName, dbName, hostPort, isNew, err := pickTarget(ctx, dumpfile)
+	containerName, dbName, hostPort, isNew, err := pickTarget(ctx, docker, dumpfile)
 	if err != nil {
 		return err
 	}
@@ -48,7 +50,7 @@ func Run(ctx context.Context, cfg *config.AppConf) error {
 
 	if isNew {
 		fmt.Fprintf(os.Stderr, "Starting container %s (%s) on port %d...\n", containerName, cfg.Restore.PGImage, hostPort)
-		if err := dockerutil.RunPostgres(ctx, containerName, cfg.Restore.PGImage, cfg.Restore.PGPassword, hostPort); err != nil {
+		if err := docker.RunPostgres(ctx, containerName, cfg.Restore.PGImage, cfg.Restore.PGPassword, hostPort); err != nil {
 			return fmt.Errorf("start container: %w", err)
 		}
 	}
@@ -76,8 +78,8 @@ func Run(ctx context.Context, cfg *config.AppConf) error {
 	fmt.Println("Done.")
 	fmt.Printf("  Container : %s\n", containerName)
 	fmt.Printf("  Connect   : psql %s\n", conn)
-	fmt.Printf("  Stop      : docker stop %s\n", containerName)
-	fmt.Printf("  Remove    : docker rm -f %s\n", containerName)
+	fmt.Printf("  Stop      : %s stop %s\n", cfg.Restore.ContainerCmd, containerName)
+	fmt.Printf("  Remove    : %s rm -f %s\n", cfg.Restore.ContainerCmd, containerName)
 	return nil
 }
 
@@ -100,8 +102,8 @@ func pickDumpFile() (string, error) {
 // pickTarget lets the user restore into a new container or reuse an
 // existing pgcloner-* one, returning the container name, target database
 // name, host port, and whether the container still needs to be created.
-func pickTarget(ctx context.Context, dumpfile string) (containerName, dbName string, hostPort int, isNew bool, err error) {
-	existing, err := dockerutil.ListContainers(ctx)
+func pickTarget(ctx context.Context, docker *dockerutil.Client, dumpfile string) (containerName, dbName string, hostPort int, isNew bool, err error) {
+	existing, err := docker.ListContainers(ctx)
 	if err != nil {
 		return "", "", 0, false, err
 	}
@@ -131,7 +133,7 @@ func pickTarget(ctx context.Context, dumpfile string) (containerName, dbName str
 
 	containerName = strings.SplitN(picked, " (", 2)[0]
 	dbName = dbNameFromFile.ReplaceAllString(strings.TrimSuffix(filepath.Base(dumpfile), ".sql"), "")
-	portStr, err := dockerutil.HostPort(ctx, containerName)
+	portStr, err := docker.HostPort(ctx, containerName)
 	if err != nil || portStr == "" {
 		return "", "", 0, false, fmt.Errorf("could not determine port for %s — is it running?", containerName)
 	}

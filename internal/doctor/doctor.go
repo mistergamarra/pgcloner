@@ -29,28 +29,34 @@ type Binary struct {
 	UsedBy []string
 }
 
-// Binaries is every external dependency this tool ever shells out to.
-var Binaries = []Binary{
-	{
-		Name:        "tsh",
-		VersionArgs: []string{"version"},
-		UsedBy:      []string{"login", "db-list", "dump"},
-	},
-	{
-		Name:        "pg_dump",
-		VersionArgs: []string{"--version"},
-		UsedBy:      []string{"dump"},
-	},
-	{
-		Name:        "psql",
-		VersionArgs: []string{"--version"},
-		UsedBy:      []string{"dump", "restore"},
-	},
-	{
-		Name:        "docker",
-		VersionArgs: []string{"--version"},
-		UsedBy:      []string{"restore"},
-	},
+// binaries returns every external dependency this tool ever shells out
+// to. containerCmd is whatever restore.container_cmd is configured to
+// (normally "docker", but "podman" works identically) — the doctor check
+// and preflight hooks need to check for the binary actually in use, not
+// a hardcoded "docker".
+func binaries(containerCmd string) []Binary {
+	return []Binary{
+		{
+			Name:        "tsh",
+			VersionArgs: []string{"version"},
+			UsedBy:      []string{"login", "db-list", "dump"},
+		},
+		{
+			Name:        "pg_dump",
+			VersionArgs: []string{"--version"},
+			UsedBy:      []string{"dump"},
+		},
+		{
+			Name:        "psql",
+			VersionArgs: []string{"--version"},
+			UsedBy:      []string{"dump", "restore"},
+		},
+		{
+			Name:        containerCmd,
+			VersionArgs: []string{"--version"},
+			UsedBy:      []string{"restore"},
+		},
+	}
 }
 
 // Result is one binary's check outcome.
@@ -65,10 +71,12 @@ type Result struct {
 func (r Result) OK() bool { return r.Err == nil }
 
 // Check runs PATH lookups (and version probes) for every binary in for.
-// A nil/empty for checks everything.
-func Check(ctx context.Context, forCommand ...string) []Result {
-	results := make([]Result, 0, len(Binaries))
-	for _, b := range Binaries {
+// A nil/empty for checks everything. containerCmd is the configured
+// container runtime binary ("docker" or "podman").
+func Check(ctx context.Context, containerCmd string, forCommand ...string) []Result {
+	all := binaries(containerCmd)
+	results := make([]Result, 0, len(all))
+	for _, b := range all {
 		if len(forCommand) > 0 && !usedByAny(b, forCommand) {
 			continue
 		}
@@ -110,10 +118,11 @@ func firstLine(b []byte) string {
 }
 
 // Require checks only the binaries used by the given command names and
-// returns one combined, actionable error if any are missing.
-func Require(ctx context.Context, forCommand ...string) error {
+// returns one combined, actionable error if any are missing. containerCmd
+// is the configured container runtime binary ("docker" or "podman").
+func Require(ctx context.Context, containerCmd string, forCommand ...string) error {
 	var missing []string
-	for _, r := range Check(ctx, forCommand...) {
+	for _, r := range Check(ctx, containerCmd, forCommand...) {
 		if !r.OK() {
 			missing = append(missing, fmt.Sprintf("  - %s: %s", r.Binary.Name, readmePointer))
 		}
@@ -125,13 +134,15 @@ func Require(ctx context.Context, forCommand ...string) error {
 		strings.Join(missing, "\n"))
 }
 
-// Report writes a human-readable ✓/✗ line per binary to w, plus a Docker
-// daemon reachability check, and reports whether everything required is
-// present (the daemon check is informational only — it doesn't fail the
-// overall result, since `restore` fails with its own clear error later).
-func Report(ctx context.Context, w io.Writer) (allOK bool) {
+// Report writes a human-readable ✓/✗ line per binary to w, plus a
+// container-runtime daemon reachability check, and reports whether
+// everything required is present (the daemon check is informational
+// only — it doesn't fail the overall result, since `restore` fails with
+// its own clear error later). containerCmd is the configured container
+// runtime binary ("docker" or "podman").
+func Report(ctx context.Context, w io.Writer, containerCmd string) (allOK bool) {
 	allOK = true
-	for _, r := range Check(ctx) {
+	for _, r := range Check(ctx, containerCmd) {
 		if !r.OK() {
 			allOK = false
 			fmt.Fprintf(w, "✗ %-8s not found — %s\n", r.Binary.Name, readmePointer)
@@ -142,9 +153,9 @@ func Report(ctx context.Context, w io.Writer) (allOK bool) {
 			version = "found"
 		}
 		fmt.Fprintf(w, "✓ %-8s %s (%s)\n", r.Binary.Name, version, r.Path)
-		if r.Binary.Name == "docker" {
-			if err := exec.CommandContext(ctx, "docker", "info").Run(); err != nil {
-				fmt.Fprintf(w, "  ⚠ docker daemon not reachable — is Docker running?\n")
+		if r.Binary.Name == containerCmd {
+			if err := exec.CommandContext(ctx, containerCmd, "info").Run(); err != nil {
+				fmt.Fprintf(w, "  ⚠ %s daemon not reachable — is it running?\n", containerCmd)
 			}
 		}
 	}

@@ -57,7 +57,12 @@ func (t TeleportConf) DBUsers() []string {
 }
 
 type RestoreConf struct {
-	// PGImage is the Docker image used for restore containers. Any
+	// ContainerCmd is the container CLI binary used for restore
+	// containers: "docker" or "podman" (Podman mirrors Docker's
+	// ps/inspect/run/rm flags and template output closely enough that
+	// nothing else in this tool needs to change between them).
+	ContainerCmd string `koanf:"container_cmd"`
+	// PGImage is the container image used for restore containers. Any
 	// postgres or postgis/postgis tag works.
 	PGImage string `koanf:"pg_image"`
 	// PGPassword is the superuser password set on restore containers.
@@ -71,8 +76,9 @@ func defaults() *AppConf {
 			Bootstrap: "postgres",
 		},
 		Restore: RestoreConf{
-			PGImage:    "postgres:16",
-			PGPassword: "postgres",
+			ContainerCmd: "docker",
+			PGImage:      "postgres:16",
+			PGPassword:   "postgres",
 		},
 	}
 }

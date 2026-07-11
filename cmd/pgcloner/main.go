@@ -26,12 +26,13 @@ import (
 )
 
 const (
-	flagCluster    = "teleport-cluster"
-	flagDBUsers    = "db-users"
-	flagDBPort     = "db-port"
-	flagBootstrap  = "bootstrap-db"
-	flagPGImage    = "pg-image"
-	flagPGPassword = "pg-password"
+	flagCluster      = "teleport-cluster"
+	flagDBUsers      = "db-users"
+	flagDBPort       = "db-port"
+	flagBootstrap    = "bootstrap-db"
+	flagContainerCmd = "container-cmd"
+	flagPGImage      = "pg-image"
+	flagPGPassword   = "pg-password"
 )
 
 // version, commit, and date are set via -ldflags at build time (see
@@ -119,9 +120,14 @@ func main() {
 				Usage: "database used to list other databases when your Teleport role allows any",
 			},
 			&cli.StringFlag{
+				Name:  flagContainerCmd,
+				Value: cfg.Restore.ContainerCmd,
+				Usage: "container CLI used for restore containers: docker or podman",
+			},
+			&cli.StringFlag{
 				Name:  flagPGImage,
 				Value: cfg.Restore.PGImage,
-				Usage: "Docker image used for restore containers (any postgres or postgis/postgis tag)",
+				Usage: "container image used for restore containers (any postgres or postgis/postgis tag)",
 			},
 			&cli.StringFlag{
 				Name:  flagPGPassword,
@@ -137,7 +143,7 @@ func main() {
 			{
 				Name:   "login",
 				Usage:  "log in to the Teleport cluster",
-				Before: requireTools("login"),
+				Before: requireTools(cfg, "login"),
 				Action: func(ctx context.Context, cmd *cli.Command) error {
 					if cfg.Teleport.Cluster == "" {
 						return fmt.Errorf("no Teleport cluster configured — set --%s or PGCLONER_TELEPORT__CLUSTER", flagCluster)
@@ -148,7 +154,7 @@ func main() {
 			{
 				Name:   "db-list",
 				Usage:  "list Teleport DB resources in the cluster",
-				Before: requireTools("db-list"),
+				Before: requireTools(cfg, "db-list"),
 				Action: func(ctx context.Context, cmd *cli.Command) error {
 					names, err := teleport.ListDBResources(ctx)
 					if err != nil {
@@ -163,7 +169,7 @@ func main() {
 			{
 				Name:   "dump",
 				Usage:  "interactive: DB resource -> user -> database -> schema -> tables -> dump",
-				Before: requireTools("dump"),
+				Before: requireTools(cfg, "dump"),
 				Action: func(ctx context.Context, cmd *cli.Command) error {
 					return dumpcmd.Run(ctx, cfg)
 				},
@@ -171,16 +177,16 @@ func main() {
 			{
 				Name:   "restore",
 				Usage:  "interactive: pick a .sql dump -> create local DB -> restore",
-				Before: requireTools("restore"),
+				Before: requireTools(cfg, "restore"),
 				Action: func(ctx context.Context, cmd *cli.Command) error {
 					return restorecmd.Run(ctx, cfg)
 				},
 			},
 			{
 				Name:  "doctor",
-				Usage: "check that tsh, pg_dump, psql, and docker are installed and reachable",
+				Usage: "check that tsh, pg_dump, psql, and the configured container CLI are installed and reachable",
 				Action: func(ctx context.Context, cmd *cli.Command) error {
-					if ok := doctor.Report(ctx, cmd.Root().Writer); !ok {
+					if ok := doctor.Report(ctx, cmd.Root().Writer, cfg.Restore.ContainerCmd); !ok {
 						return fmt.Errorf("one or more required tools are missing (see above)")
 					}
 					return nil
@@ -206,12 +212,14 @@ func main() {
 }
 
 // requireTools returns a Before hook that fails fast with an actionable
-// error if any binary the given command name depends on (per
-// doctor.Binaries' UsedBy) isn't on PATH — instead of surfacing as a bare
-// "exec: not found" partway through an interactive wizard.
-func requireTools(commandName string) cli.BeforeFunc {
+// error if any binary the given command name depends on isn't on PATH —
+// instead of surfacing as a bare "exec: not found" partway through an
+// interactive wizard. Closes over cfg so it always checks whichever
+// container CLI (docker/podman) is actually configured, reflecting any
+// --container-cmd flag override applied by the root Before hook.
+func requireTools(cfg *config.AppConf, commandName string) cli.BeforeFunc {
 	return func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
-		return ctx, doctor.Require(ctx, commandName)
+		return ctx, doctor.Require(ctx, cfg.Restore.ContainerCmd, commandName)
 	}
 }
 
@@ -229,6 +237,9 @@ func applyFlagOverrides(cmd *cli.Command, cfg *config.AppConf) {
 	}
 	if cmd.IsSet(flagBootstrap) {
 		cfg.Teleport.Bootstrap = cmd.String(flagBootstrap)
+	}
+	if cmd.IsSet(flagContainerCmd) {
+		cfg.Restore.ContainerCmd = cmd.String(flagContainerCmd)
 	}
 	if cmd.IsSet(flagPGImage) {
 		cfg.Restore.PGImage = cmd.String(flagPGImage)

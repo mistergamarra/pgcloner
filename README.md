@@ -6,9 +6,10 @@
 
 Interactive Go CLI for pulling PostgreSQL dumps from remote databases via
 [Teleport](https://goteleport.com/) and restoring them into isolated local
-Docker containers. Nothing in the tool is tied to a particular Teleport
-cluster, database role naming scheme, or Docker image — every setting is
-configurable via flag, environment variable, or `.env` file.
+containers (Docker or Podman). Nothing in the tool is tied to a particular
+Teleport cluster, database role naming scheme, container runtime, or
+image — every setting is configurable via flag, environment variable, or
+`.env` file.
 
 ## Prerequisites
 
@@ -18,7 +19,11 @@ External binaries on `PATH`:
 |------|---------|---------|
 | `tsh` (Teleport) | Authenticate and proxy Teleport DB connections | `brew install teleport` (macOS) or see [goteleport.com/docs/installation](https://goteleport.com/docs/installation/) |
 | `pg_dump` / `psql` (libpq) | Run the actual dump and restore | `brew install libpq && brew link --force libpq` (macOS) or `apt install postgresql-client` (Debian/Ubuntu) |
-| `docker` | Run isolated restore containers | see [docs.docker.com/get-docker](https://docs.docker.com/get-docker/) |
+| `docker` **or** `podman` | Run isolated restore containers | Docker: see [docs.docker.com/get-docker](https://docs.docker.com/get-docker/). Podman: `brew install podman && podman machine init && podman machine start` (macOS) or see [podman.io/docs/installation](https://podman.io/docs/installation) — set `--container-cmd podman` (or `PGCLONER_RESTORE__CONTAINER_CMD=podman`) to use it |
+
+Podman is a fully open-source, daemonless drop-in for everything `restore`
+does with Docker (`run`/`ps`/`inspect`/`rm`) — useful if you want to avoid
+Docker Desktop's commercial licensing terms. Docker remains the default.
 
 Go dependencies (`go.mod`) are fetched automatically by `go build`/`go run`.
 Run `pgcloner doctor` after building to check all of the above are
@@ -131,6 +136,7 @@ Every setting can be set three ways, in order of precedence:
 | `--db-port` | `PGCLONER_TELEPORT__DB_PORT` | `10007` | local proxy port |
 | `--db-users` | `PGCLONER_TELEPORT__DB_USERS` | *(none)* | comma-separated list shown in the user-selection step; omit to type one freely |
 | `--bootstrap-db` | `PGCLONER_TELEPORT__BOOTSTRAP_DB` | `postgres` | fallback DB for listing other databases |
+| `--container-cmd` | `PGCLONER_RESTORE__CONTAINER_CMD` | `docker` | `docker` or `podman` |
 | `--pg-image` | `PGCLONER_RESTORE__PG_IMAGE` | `postgres:16` | any `postgres` or `postgis/postgis` tag |
 | `--pg-password` | `PGCLONER_RESTORE__PG_PASSWORD` | `postgres` | superuser password for the local container |
 
@@ -163,6 +169,8 @@ pgcloner/
 ```
 
 ## Managing containers
+
+Replace `docker` with `podman` below if that's what you configured.
 
 ```sh
 docker ps -a --filter name=pgcloner-

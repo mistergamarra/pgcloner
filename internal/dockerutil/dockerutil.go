@@ -1,5 +1,6 @@
-// Package dockerutil shells out to the docker CLI to manage the disposable
-// PostgreSQL containers restore.sh's Go equivalent restores into.
+// Package dockerutil shells out to a container CLI (docker or podman — see
+// Client) to manage the disposable PostgreSQL containers restore.sh's Go
+// equivalent restores into.
 package dockerutil
 
 import (
@@ -12,6 +13,18 @@ import (
 	"strings"
 )
 
+// Client runs container commands via the given binary. Docker and Podman
+// are both supported — Podman mirrors Docker's `ps`/`inspect`/`run`/`rm`
+// flags and Go-template output closely enough that no command here needs
+// to differ between them.
+type Client struct {
+	// Bin is the container CLI binary name (e.g. "docker" or "podman").
+	Bin string
+}
+
+// New returns a Client that shells out to bin.
+func New(bin string) *Client { return &Client{Bin: bin} }
+
 // Container describes one existing "pgcloner-*" container.
 type Container struct {
 	Name   string
@@ -19,11 +32,11 @@ type Container struct {
 }
 
 // ListContainers lists containers whose name starts with "pgcloner-".
-func ListContainers(ctx context.Context) ([]Container, error) {
-	out, err := exec.CommandContext(ctx, "docker", "ps", "-a",
+func (c *Client) ListContainers(ctx context.Context) ([]Container, error) {
+	out, err := exec.CommandContext(ctx, c.Bin, "ps", "-a",
 		"--filter", "name=pgcloner-", "--format", "{{.Names}}|{{.Status}}").Output()
 	if err != nil {
-		return nil, fmt.Errorf("docker ps: %w", err)
+		return nil, fmt.Errorf("%s ps: %w", c.Bin, err)
 	}
 	var containers []Container
 	sc := bufio.NewScanner(strings.NewReader(string(out)))
@@ -40,10 +53,10 @@ func ListContainers(ctx context.Context) ([]Container, error) {
 
 // Exists reports whether a container with the given name exists (running
 // or stopped).
-func Exists(ctx context.Context, name string) (bool, error) {
-	out, err := exec.CommandContext(ctx, "docker", "ps", "-a", "--format", "{{.Names}}").Output()
+func (c *Client) Exists(ctx context.Context, name string) (bool, error) {
+	out, err := exec.CommandContext(ctx, c.Bin, "ps", "-a", "--format", "{{.Names}}").Output()
 	if err != nil {
-		return false, fmt.Errorf("docker ps: %w", err)
+		return false, fmt.Errorf("%s ps: %w", c.Bin, err)
 	}
 	for _, n := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if n == name {
@@ -54,16 +67,16 @@ func Exists(ctx context.Context, name string) (bool, error) {
 }
 
 // RemoveForce force-removes a container, ignoring "not found" errors.
-func RemoveForce(ctx context.Context, name string) error {
-	return exec.CommandContext(ctx, "docker", "rm", "-f", name).Run()
+func (c *Client) RemoveForce(ctx context.Context, name string) error {
+	return exec.CommandContext(ctx, c.Bin, "rm", "-f", name).Run()
 }
 
 // HostPort inspects a running container's published port for 5432/tcp.
-func HostPort(ctx context.Context, name string) (string, error) {
-	out, err := exec.CommandContext(ctx, "docker", "inspect", "--format",
+func (c *Client) HostPort(ctx context.Context, name string) (string, error) {
+	out, err := exec.CommandContext(ctx, c.Bin, "inspect", "--format",
 		`{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}`, name).Output()
 	if err != nil {
-		return "", fmt.Errorf("docker inspect %s: %w", name, err)
+		return "", fmt.Errorf("%s inspect %s: %w", c.Bin, name, err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -80,17 +93,17 @@ func FreePort() (int, error) {
 
 // RunPostgres starts a fresh postgres/postgis container publishing 5432 on
 // hostPort, removing any pre-existing container with the same name first.
-func RunPostgres(ctx context.Context, name, image, password string, hostPort int) error {
-	exists, err := Exists(ctx, name)
+func (c *Client) RunPostgres(ctx context.Context, name, image, password string, hostPort int) error {
+	exists, err := c.Exists(ctx, name)
 	if err != nil {
 		return err
 	}
 	if exists {
-		if err := RemoveForce(ctx, name); err != nil {
+		if err := c.RemoveForce(ctx, name); err != nil {
 			return fmt.Errorf("remove existing container %s: %w", name, err)
 		}
 	}
-	cmd := exec.CommandContext(ctx, "docker", "run", "-d",
+	cmd := exec.CommandContext(ctx, c.Bin, "run", "-d",
 		"--name", name,
 		"-e", "POSTGRES_USER=postgres",
 		"-e", "POSTGRES_PASSWORD="+password,

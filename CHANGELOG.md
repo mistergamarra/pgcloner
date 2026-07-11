@@ -5,6 +5,16 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [0.0.3] - 2026-07-09
 
+### Added
+
+- `restore` can now use [Podman](https://podman.io) instead of Docker —
+  set `--container-cmd podman` or `PGCLONER_RESTORE__CONTAINER_CMD=podman`.
+  Podman is a verified drop-in for every container command this tool
+  issues (`run`, `ps --filter --format`, `inspect --format`, `rm -f`),
+  useful if you want to avoid Docker Desktop's commercial licensing.
+  `doctor` and the `restore` preflight check now check for whichever
+  runtime is configured instead of assuming `docker`.
+
 ### Fixed
 
 - `dump` could get permanently stuck when Teleport's suggested bootstrap
