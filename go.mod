@@ -5,7 +5,7 @@ go 1.26.5
 require (
 	github.com/charmbracelet/huh v1.0.0
 	github.com/charmbracelet/x/term v0.2.2
-	github.com/jackc/pgx/v5 v5.10.0
+	github.com/jackc/pgx/v5 v5.11.0
 	github.com/joho/godotenv v1.5.1
 	github.com/knadh/koanf/providers/env v1.1.0
 	github.com/knadh/koanf/providers/structs v1.0.0
